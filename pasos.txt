@@ -1,0 +1,10 @@
+Generar entonro
+
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+
+cloudflared tunnel --config C:\Users\alexv\.cloudflared\config.yml run tradingview-mt5
+
+
+

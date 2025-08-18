@@ -1,0 +1,21 @@
+# FastAPI y servidor
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Base de datos
+sqlalchemy==2.0.23
+alembic==1.12.1
+
+# IMPORTANTE: NumPy debe ser < 2.0 para compatibilidad con MT5
+numpy<2.0
+
+# MetaTrader 5
+MetaTrader5==5.0.45
+
+# Utilidades
+python-dotenv==1.0.0
+requests==2.31.0
+
+# Logging y monitoreo (opcional)
+colorlog==6.7.0
