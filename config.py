@@ -22,6 +22,11 @@ class Settings:
     POSITION_SIZE = float(os.getenv("POSITION_SIZE", "0.01"))
     MAGIC_NUMBER = int(os.getenv("MAGIC_NUMBER", "123456"))
     SLIPPAGE = int(os.getenv("SLIPPAGE", "10"))  # Slippage en puntos
+
+     # Control por monto en vez de niveles fijos
+    USE_SLTP = os.getenv("USE_SLTP", "True").lower() == "true"  # Usar niveles de SL/TP calculados
+    TP_AMOUNT = float(os.getenv("TP_AMOUNT", "0"))              # Cerrar al alcanzar esta ganancia
+    SL_AMOUNT = float(os.getenv("SL_AMOUNT", "0"))              # Cerrar al alcanzar esta pérdida
     
     # Stop Loss Configuration MEJORADA
     SL_MARGIN_TICKS = int(os.getenv("SL_MARGIN_TICKS", "5"))  # Ticks de margen para SL desde vela

@@ -178,6 +178,8 @@ class MT5Service:
                 if settings.SKIP_HIGH_SPREAD:
                     return None
             
+            
+            
             # Obtener extremos de la vela anterior
             high, low = self.get_last_candle_extremes(symbol)
             if high is None or low is None:
@@ -279,11 +281,20 @@ class MT5Service:
             if not symbol_info.visible:
                 mt5.symbol_select(symbol, True)
             
-            # Calcular SL y TP
-            levels = self.calculate_sl_tp(symbol, alert.action, alert.ratio_beneficio)
-            if not levels:
-                return {"success": False, "error": "No se pudieron calcular niveles SL/TP"}
             
+             # Calcular precio y niveles según configuración
+            levels = None
+            if settings.USE_SLTP:
+                levels = self.calculate_sl_tp(symbol, alert.action, alert.ratio_beneficio)
+                if not levels:
+                    return {"success": False, "error": "No se pudieron calcular niveles SL/TP"}
+                price = levels['price']
+            else:
+                tick = mt5.symbol_info_tick(symbol)
+                if not tick:
+                    return {"success": False, "error": f"No se pudo obtener precio para {symbol}"}
+                price = tick.bid
+
             # Preparar la orden
             order_type = mt5.ORDER_TYPE_BUY if alert.action == TipoOperacion.BUY else mt5.ORDER_TYPE_SELL
             
@@ -292,7 +303,7 @@ class MT5Service:
                 "symbol": symbol,
                 "volume": alert.volume,
                 "type": order_type,
-                "price": levels['price'],
+                "price": price,
                 "deviation": settings.SLIPPAGE,
                 "magic": settings.MAGIC_NUMBER,
                 "comment": f"Alert_{alert.id}_R{alert.ratio_beneficio}",
@@ -315,10 +326,10 @@ class MT5Service:
                 "ticket": result.order,
                 "price": result.price,
                 "volume": result.volume,
-                "stop_loss": levels['stop_loss'],
-                "take_profit": levels['take_profit'],
-                "sl_distance_ticks": levels['sl_distance_ticks'],
-                "tp_distance_ticks": levels['tp_distance_ticks']
+                "stop_loss": levels['stop_loss'] if levels else None,
+                "take_profit": levels['take_profit'] if levels else None,
+                "sl_distance_ticks": levels['sl_distance_ticks'] if levels else 0,
+                "tp_distance_ticks": levels['tp_distance_ticks'] if levels else 0
             }
             
         except Exception as e:
