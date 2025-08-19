@@ -86,18 +86,11 @@ class TradingExecutor:
                             alert.price = mt5_position.price_open
                             logger.info(f"   📝 Actualizado precio de Alert {alert.id}")
                         
-                        # Verificar que los niveles de SL/TP estén establecidos (solo si se usan)
-                        if settings.USE_SLTP and (not alert.stop_loss or not alert.take_profit):
-                            # Recalcular niveles si no están establecidos
-                            levels = mt5_service.calculate_sl_tp(
-                                alert.symbol, 
-                                alert.action, 
-                                alert.ratio_beneficio
-                            )
-                            if levels:
-                                alert.stop_loss = levels['stop_loss']
-                                alert.take_profit = levels['take_profit']
-                                logger.info(f"   📏 Recalculados SL/TP para Alert {alert.id}")
+                        # Si no hay SL/TP registrados, asumimos control por monto
+                        if settings.USE_SLTP and alert.stop_loss and alert.take_profit:
+                            logger.debug(f"   ✅ SL/TP presentes para Alert {alert.id}")
+                        else:
+                            logger.debug(f"   🔢 Operación {alert.id} sin niveles SL/TP - monitoreo por monto")
                         
                         logger.info(f"   ✅ Alert {alert.id} (Ticket {alert.ticket_mt5}) sigue abierta")
                         recovered += 1
@@ -338,91 +331,94 @@ class TradingExecutor:
             
             for alert in open_positions:
                 try:
-                    if settings.USE_SLTP:
-                        # Verificar si el precio ha alcanzado SL o TP
+                    # Primero intentamos cerrar por niveles si existen
+                    level_hit = None
+                    if settings.USE_SLTP and alert.stop_loss and alert.take_profit:
                         level_hit = mt5_service.check_price_levels(alert)
 
-                        if level_hit:
-                            logger.info(f"🎯 Nivel {level_hit} alcanzado para Alert {alert.id}")
+                    if level_hit:
+                        logger.info(f"🎯 Nivel {level_hit} alcanzado para Alert {alert.id}")
 
-                            # Cerrar la posición
-                            close_result = mt5_service.close_position(
-                                alert.ticket_mt5,
-                                alert.symbol,
-                                alert.action,
-                                alert.volume
-                            )
+                        # Cerrar la posición
+                        close_result = mt5_service.close_position(
+                            alert.ticket_mt5,
+                            alert.symbol,
+                            alert.action,
+                            alert.volume
+                        )
 
-                            if close_result["success"]:
-                                # Obtener el beneficio real
-                                profit = mt5_service.get_position_profit(alert.ticket_mt5)
-                                if profit is None:
-                                    # Calcular beneficio manualmente si no está disponible
-                                    profit = self._calculate_profit(
-                                        alert,
-                                        close_result["close_price"]
-                                    )
+                        if close_result["success"]:
+                            # Obtener el beneficio real
+                            profit = mt5_service.get_position_profit(alert.ticket_mt5)
+                            if profit is None:
+                                # Calcular beneficio manualmente si no está disponible
+                                profit = self._calculate_profit(
+                                    alert,
+                                    close_result["close_price"]
+                                )
 
-                                # Actualizar el registro
-                                alert.beneficio = profit
-                                alert.estatus = EstadoOperacion.SL if level_hit == 'SL' else EstadoOperacion.TP
-                                alert.fecha_cierre = close_result["close_time"]
+                            # Actualizar el registro
+                            alert.beneficio = profit
+                            alert.estatus = EstadoOperacion.SL if level_hit == 'SL' else EstadoOperacion.TP
+                            alert.fecha_cierre = close_result["close_time"]
 
-                                session.commit()
+                            session.commit()
 
-                                # Log del resultado
-                                emoji = "🔴" if level_hit == 'SL' else "🟢"
-                                logger.info(f"{emoji} Posición cerrada por {level_hit}:")
-                                logger.info(f"   Alert ID: {alert.id}")
-                                logger.info(f"   Ticket: {alert.ticket_mt5}")
-                                logger.info(f"   Símbolo: {alert.symbol}")
-                                logger.info(f"   Beneficio: ${profit:.2f}")
-                                logger.info(f"   Ratio: 1:{alert.ratio_beneficio}")
-                            else:
-                                logger.error(f"❌ Error cerrando posición: {close_result.get('error')}")
-                    else:
-                        # Verificar monto de ganancia o pérdida
-                        profit = mt5_service.get_position_profit(alert.ticket_mt5)
-                        if profit is None:
-                            continue
+                            # Log del resultado
+                            emoji = "🔴" if level_hit == 'SL' else "🟢"
+                            logger.info(f"{emoji} Posición cerrada por {level_hit}:")
+                            logger.info(f"   Alert ID: {alert.id}")
+                            logger.info(f"   Ticket: {alert.ticket_mt5}")
+                            logger.info(f"   Símbolo: {alert.symbol}")
+                            logger.info(f"   Beneficio: ${profit:.2f}")
+                            logger.info(f"   Ratio: 1:{alert.ratio_beneficio}")
+                        else:
+                            logger.error(f"❌ Error cerrando posición: {close_result.get('error')}")
 
-                        hit_loss = settings.SL_AMOUNT > 0 and profit <= -settings.SL_AMOUNT
-                        hit_profit = settings.TP_AMOUNT > 0 and profit >= settings.TP_AMOUNT
+                        continue  # Ya cerramos por nivel
 
-                        if hit_loss or hit_profit:
-                            logger.info(
-                                f"🎯 Monto {'de pérdida' if hit_loss else 'de ganancia'} alcanzado para Alert {alert.id}"
-                            )
+                    # Verificar monto de ganancia o pérdida
+                    profit = mt5_service.get_position_profit(alert.ticket_mt5)
+                    if profit is None:
+                        continue
 
-                            close_result = mt5_service.close_position(
-                                alert.ticket_mt5,
-                                alert.symbol,
-                                alert.action,
-                                alert.volume
-                            )
+                    hit_loss = settings.SL_AMOUNT > 0 and profit <= -settings.SL_AMOUNT
+                    hit_profit = settings.TP_AMOUNT > 0 and profit >= settings.TP_AMOUNT
 
-                            if close_result["success"]:
-                                final_profit = mt5_service.get_position_profit(alert.ticket_mt5)
-                                if final_profit is None:
-                                    final_profit = self._calculate_profit(
-                                        alert,
-                                        close_result["close_price"]
-                                    )
+                    if hit_loss or hit_profit:
+                        logger.info(
+                            f"🎯 Monto {'de pérdida' if hit_loss else 'de ganancia'} alcanzado para Alert {alert.id}"
+                        )
 
-                                alert.beneficio = final_profit
-                                alert.estatus = EstadoOperacion.SL if hit_loss else EstadoOperacion.TP
-                                alert.fecha_cierre = close_result["close_time"]
+                        close_result = mt5_service.close_position(
+                            alert.ticket_mt5,
+                            alert.symbol,
+                            alert.action,
+                            alert.volume
+                        )
 
-                                session.commit()
+                        if close_result["success"]:
+                            final_profit = mt5_service.get_position_profit(alert.ticket_mt5)
+                            if final_profit is None:
+                                final_profit = self._calculate_profit(
+                                    alert,
+                                    close_result["close_price"]
+                                )
 
-                                emoji = "🔴" if hit_loss else "🟢"
-                                logger.info(f"{emoji} Posición cerrada por monto:")
-                                logger.info(f"   Alert ID: {alert.id}")
-                                logger.info(f"   Ticket: {alert.ticket_mt5}")
-                                logger.info(f"   Símbolo: {alert.symbol}")
-                                logger.info(f"   Beneficio: ${final_profit:.2f}")
-                            else:
-                                logger.error(f"❌ Error cerrando posición: {close_result.get('error')}")
+                            alert.beneficio = final_profit
+                            alert.estatus = EstadoOperacion.SL if hit_loss else EstadoOperacion.TP
+                            alert.fecha_cierre = close_result["close_time"]
+
+                            session.commit()
+
+                            emoji = "🔴" if hit_loss else "🟢"
+                            logger.info(f"{emoji} Posición cerrada por monto:")
+                            logger.info(f"   Alert ID: {alert.id}")
+                            logger.info(f"   Ticket: {alert.ticket_mt5}")
+                            logger.info(f"   Símbolo: {alert.symbol}")
+                            logger.info(f"   Beneficio: ${final_profit:.2f}")
+                        else:
+                            logger.error(f"❌ Error cerrando posición: {close_result.get('error')}")
                     
                 except Exception as e:
                     logger.error(f"❌ Error monitoreando Alert {alert.id}: {e}")

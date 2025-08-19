@@ -25,8 +25,8 @@ class Settings:
 
      # Control por monto en vez de niveles fijos
     USE_SLTP = os.getenv("USE_SLTP", "True").lower() == "true"  # Usar niveles de SL/TP calculados
-    TP_AMOUNT = float(os.getenv("TP_AMOUNT", "0"))              # Cerrar al alcanzar esta ganancia
-    SL_AMOUNT = float(os.getenv("SL_AMOUNT", "0"))              # Cerrar al alcanzar esta pérdida
+    TP_AMOUNT = float(os.getenv("TP_AMOUNT", os.getenv("TAKE_PROFIT_AMOUNT", "0")))  # Ganancia por monto
+    SL_AMOUNT = float(os.getenv("SL_AMOUNT", os.getenv("STOP_LOSS_AMOUNT", "0")))    # Pérdida por monto
     
     # Stop Loss Configuration MEJORADA
     SL_MARGIN_TICKS = int(os.getenv("SL_MARGIN_TICKS", "5"))  # Ticks de margen para SL desde vela
