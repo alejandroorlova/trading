@@ -55,6 +55,10 @@ class Settings:
     # NUEVO: Control de riesgo mejorado
     MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", "1.5"))  # Ratio mínimo para entrar
     SKIP_HIGH_SPREAD = os.getenv("SKIP_HIGH_SPREAD", "True").lower() == "true"
+
+    TP_MODE = os.getenv("TP_MODE", "USD").upper()   # "USD" o "RATIO" (precio)
+    RISK_MONEY_PER_TRADE = float(os.getenv("RISK_MONEY_PER_TRADE", "1.0"))
+    TARGET_MONEY_PER_TRADE = float(os.getenv("TARGET_MONEY_PER_TRADE", "10.0"))
     
     @property
     def get_reward_ratios(self):

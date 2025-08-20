@@ -11,6 +11,7 @@ import time
 from config import settings
 from database import get_db_session
 from models import Alert, TipoOperacion, EstadoOperacion
+from config import TP_MODE, RISK_MONEY_PER_TRADE, TARGET_MONEY_PER_TRADE
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,46 @@ class MT5Service:
         except Exception as e:
             logger.error(f"❌ Error inicializando MT5: {e}")
             return False
+    
+    def open_position_money(symbol: str, action: str, volume: float) -> dict:
+        """
+        Abre una orden al precio de mercado. No calculamos TP/SL por precio
+        (puedes seguir enviándolos al servidor como respaldo si quieres),
+        pero devolvemos los montos objetivo para guardarlos en BD.
+        """
+        if mt5 is None:
+            raise RuntimeError("MT5 no disponible")
+        info = get_symbol_info(symbol)
+        order_type = mt5.ORDER_TYPE_BUY if action.upper() == "BUY" else mt5.ORDER_TYPE_SELL
+        price = (info.ask if order_type == mt5.ORDER_TYPE_BUY else info.bid)
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": float(volume),
+            "type": order_type,
+            "price": float(price),
+            "deviation": settings.SLIPPAGE,
+            "magic": settings.MAGIC_NUMBER,
+            "comment": f"MONEY_MODE",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        result = mt5.order_send(request)
+        ok = result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
+        ticket = (result._asdict().get("order") if ok else None) if result else None
+
+        # Montos objetivo para guardar en BD (en USD, signo incluido)
+        tp_money = +TARGET_MONEY_PER_TRADE
+        sl_money = -RISK_MONEY_PER_TRADE
+
+        return {
+            "ok": ok,
+            "ticket": ticket,
+            "result": (result._asdict() if result else None),
+            "tp_money": tp_money,
+            "sl_money": sl_money,
+        }
     
     def get_symbol_info(self, symbol: str) -> Optional[Any]:
         """Obtener información del símbolo con caché"""

@@ -14,6 +14,9 @@ from models import Alert, EstadoOperacion, TipoOperacion
 from mt5_service import mt5_service
 from config import settings
 
+from config import TP_MODE
+import MetaTrader5 as mt5
+
 logger = logging.getLogger(__name__)
 
 class TradingExecutor:
@@ -451,6 +454,62 @@ class TradingExecutor:
         except Exception as e:
             logger.error(f"Error calculando beneficio: {e}")
             return 0.0
+        
+    
+    def close_position(ticket: int) -> bool:
+        pos_list = mt5.positions_get(ticket=ticket) or []
+        if not pos_list:
+            return False
+        pos = pos_list[0]
+        symbol = pos.symbol
+        volume = pos.volume
+        order_type = pos.type  # 0=BUY, 1=SELL
+        info = mt5.symbol_info(symbol)
+        if info is None or (info.ask == 0 and info.bid == 0):
+            return False
+        price = info.bid if order_type == mt5.POSITION_TYPE_BUY else info.ask
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "position": ticket,
+            "symbol": symbol,
+            "volume": volume,
+            "type": (mt5.ORDER_TYPE_SELL if order_type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY),
+            "price": price,
+            "deviation": 50,
+            "magic": settings.MAGIC_NUMBER,
+            "comment": "CLOSE_BY_MONEY",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        res = mt5.order_send(request)
+        return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
+    
+    def monitor_by_money(alert_row) -> dict:
+        """
+        alert_row.stop_loss y alert_row.take_profit son MONTOS (USD) si TP_MODE=USD.
+        Cierra cuando la ganancia/pérdida flotante alcanza el objetivo.
+        """
+        if TP_MODE != "USD":
+            return {"skipped": True, "reason": "TP_MODE!=USD"}
+
+        ticket = alert_row.ticket_mt5
+        pos_list = mt5.positions_get(ticket=ticket) or []
+        if not pos_list:
+            return {"skipped": True, "reason": "position_not_found"}
+
+        pos = pos_list[0]
+        pnl = float(pos.profit)  # MT5 lo da en la moneda de la cuenta (normalmente USD)
+        tp_money = float(alert_row.take_profit)   # ej. +10.0
+        sl_money = float(alert_row.stop_loss)     # ej. -1.0
+
+        if pnl >= tp_money:
+            closed = close_position(ticket)
+            return {"action": "TP", "pnl": pnl, "closed": closed}
+        if pnl <= sl_money:
+            closed = close_position(ticket)
+            return {"action": "SL", "pnl": pnl, "closed": closed}
+
+        return {"action": "HOLD", "pnl": pnl}
     
     def get_status_summary(self) -> Dict[str, Any]:
         """Obtener resumen del estado actual del ejecutor"""
